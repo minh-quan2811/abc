@@ -1,48 +1,51 @@
-from app.utils.file_processer.image_ocr_parser import ImageOcrParser
-from app.utils.file_processer.pdf_parser import PdfParser
-# from langchain_anthropic import ChatAnthropic
-from app.services.llm_agent.model_manager import model_manager
-from app.core.config import settings
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-import asyncio
-from langchain_aws import BedrockLLM, ChatBedrock
-# model_bed = ChatBedrock(
-#             aws_access_key_id="",
-#             aws_secret_access_key="",
-#             model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
-#             region='us-west-2',
-#         )
+# import asyncio
+# from app.utils.refactor_file_processor.image_ocr_parser_gemini import ImageOcrParser
+# from app.utils.refactor_file_processor.pdf_parser import PdfParser
+# from app.core.config import settings
+# from langchain_google_genai import ChatGoogleGenerativeAI
 
 
-model_bed = ChatGoogleGenerativeAI(
-    google_api_key=settings.GOOGLE_API_KEY,
-    model="gemini-2.5-flash",
-    temperature=0,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
-)
+# # Setup Gemini model via LangChain
+# model = ChatGoogleGenerativeAI(
+#     google_api_key="AIzaSyAlJm0ZrIOTwmHOpxAxLV9mLV6knf3T82M",
+#     model="gemini-2.5-flash",
+#     temperature=0,
+#     max_tokens=None,
+#     timeout=None,
+#     max_retries=2,
+# )
 
-# 1. Setup model
-# llm = model_manager.get_llm_ocr()
-# 2. Khởi tạo
-ocr_parser = ImageOcrParser(model_llm=model_bed)
-pdf_parser = PdfParser(ocr_parser=ocr_parser)
-
-# 3. Parse PDF
-async def parse_pdf():
-    pdf_parser.load_pdf(fr"C:\Users\PC\Downloads\data-ai-marketing\data-ai-marketing_2209\Lewis.pdf")
-    await pdf_parser.parse_and_ocr()
-    return pdf_parser.get_parsed_text()
-
-# 4. Chạy
-text = asyncio.run(parse_pdf())
-# print(text)
-with open("text.md", 'w', encoding='utf-8') as f:
-    f.write(text)
+# # Initialize parsers
+# ocr_parser = ImageOcrParser(model_llm=model)
+# pdf_parser = PdfParser(ocr_parser=ocr_parser)
 
 
-# from PIL import Image
-# text = ocr_parser.parse({'1':Image.open(fr"c:\Users\four\Downloads\Untitled.jpg")}, debug=True)
-# print(text)
+# # Parse PDF
+# async def parse_pdf():
+#     pdf_parser.load_pdf(r"C:\Users\PC\Downloads\data-ai-marketing\data-ai-marketing_2209\６００ＤＢＭ概念.pdf")
+#     await pdf_parser.parse_and_ocr(batch_size=5, filter_images=True)
+#     return pdf_parser.get_parsed_text()
+
+
+# # Run
+# if __name__ == "__main__":
+#     text = asyncio.run(parse_pdf())
+#     with open("text.md", 'w', encoding='utf-8') as f:
+#         f.write(text)
+#     print(f"✓ PDF parsed successfully! Output saved to text.md ({len(text)} chars)")
+
+
+# # Test single image (optional)
+# # from PIL import Image
+# # text = ocr_parser.parse(
+# #     {'test-id-001': Image.open(r"c:\Users\four\Downloads\Untitled.jpg")}, 
+# #     debug=True
+# # )
+# # print(text)
+
+
+prompt_path="app/utils/file_processer/ocr_prompt.md"
+with open(prompt_path, 'r', encoding='utf-8') as f:
+    user_prompt = f.read()
+
+print(user_prompt)
