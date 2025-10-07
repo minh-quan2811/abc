@@ -57,12 +57,6 @@ class ImageQualityFilter:
     ) -> Tuple[bool, float, Dict[str, float]]:
         """
         Determine if image contains meaningful content.
-        
-        Args:
-            image: PIL Image object
-            
-        Returns:
-            Tuple of (is_valid, total_score, individual_scores)
         """
         # Basic dimension checks
         if image.width < self.MIN_WIDTH or image.height < self.MIN_HEIGHT:

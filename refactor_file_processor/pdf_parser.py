@@ -63,13 +63,6 @@ class PdfParser:
     async def parse_and_ocr(self, batch_size: int = 5, filter_images: bool = True):
         """
         Parse PDF and perform OCR on extracted images.
-        
-        Args:
-            batch_size: Number of images to process per batch
-            filter_images: If True, apply quality filtering in OCR parser
-            
-        Returns:
-            List of page texts with OCR results integrated
         """
         if self.ocr_parser is None:
             logging.error(
@@ -105,25 +98,11 @@ class PdfParser:
     def _process_page(self, page, page_num: int) -> str:
         """
         Extract text and images from a single page.
-        
-        Args:
-            page: PyMuPDF page object
-            page_num: Page number
-            
-        Returns:
-            Page text with image placeholders
         """
         page_content = page.get_text('dict', sort=True)
         page_full_text = ""
 
         for block in page_content["blocks"]:
-            # Skip content in margins (50px from edges)
-            bbox = block["bbox"]
-            if (bbox[0] < 50 or bbox[1] < 50 or 
-                bbox[2] > page.rect.width - 50 or 
-                bbox[3] > page.rect.height - 50):
-                continue
-
             # Process text blocks
             if block["type"] == 0:
                 block_text = ""
@@ -140,7 +119,6 @@ class PdfParser:
                     image_bytes = block["image"]
                     image = Image.open(io.BytesIO(image_bytes))
                     
-                    # Store all images - filtering will be done by OCR parser
                     image_id = str(uuid.uuid4())
                     self.document_image[image_id] = image
                     block_placeholder_text = f'Image-Placeholder{{{image_id}}}'
@@ -168,13 +146,6 @@ class PdfParser:
     ) -> Dict[str, str]:
         """
         Perform OCR on all images in batches.
-        
-        Args:
-            batch_size: Number of images per batch
-            filter_images: Whether to apply quality filtering
-            
-        Returns:
-            Dictionary mapping image IDs to OCR text
         """
         all_results = {}
         tasks = []
@@ -197,9 +168,6 @@ class PdfParser:
     def _integrate_ocr_results(self, ocr_results: Dict[str, str]):
         """
         Replace image placeholders with OCR text.
-        
-        Args:
-            ocr_results: Dictionary mapping image IDs to OCR text
         """
         for i in range(len(self.parsed_document)):
             modified_text = self.parsed_document[i]

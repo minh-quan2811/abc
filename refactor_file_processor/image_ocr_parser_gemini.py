@@ -28,15 +28,6 @@ class ImageOcrParser:
     ):
         """
         Initialize Gemini OCR parser.
-        
-        Args:
-            model_llm: LangChain ChatGoogleGenerativeAI model
-            model_cnn: Optional EAST text detection model
-            max_image_size: Maximum image dimensions
-            min_score: Minimum quality score threshold
-            enable_dedup: Enable duplicate detection
-            east_model_path: Path to EAST model
-            ocr_prompt_path: Path to OCR prompt file
         """
         if not hasattr(model_llm, 'invoke'):
             raise TypeError(
@@ -67,14 +58,14 @@ class ImageOcrParser:
         except Exception as e:
             logger.warning(f"Could not load prompt from {prompt_path}: {e}")
             return """## Role 
-You are a professional OCR system. Extract content from images.
+            You are a professional OCR system. Extract content from images.
 
-## Output Format XML-like tags
-```text
-<image_id>
-[Extracted content here]
-</image_id>
-```"""
+            ## Output Format XML-like tags
+            ```text
+            <image_id>
+            [Extracted content here]
+            </image_id>
+            ```"""
     
     def parse(
         self,
@@ -84,14 +75,6 @@ You are a professional OCR system. Extract content from images.
     ) -> Dict[str, str]:
         """
         Parse images and return OCR content using LangChain Gemini model.
-        
-        Args:
-            images_dict: Dict of {image_id: PIL_Image}
-            debug: Enable debug logging
-            filter_images: Apply quality filtering
-            
-        Returns:
-            Dict of {image_id: extracted_text}
         """
         if not images_dict:
             return {}

@@ -38,13 +38,7 @@ class ImageProcessor:
     @staticmethod
     def image_to_jpg_bytes(image: Image.Image) -> bytes:
         """
-        Convert PIL Image to JPEG bytes (for Gemini API).
-        
-        Args:
-            image: PIL Image object
-            
-        Returns:
-            JPEG bytes
+        Convert PIL Image to JPEG bytes.
         """
         if image.mode in ("RGBA", "P"):
             image = image.convert("RGB")
@@ -57,12 +51,6 @@ class ImageProcessor:
     def validate_image_id(img_id: str) -> None:
         """
         Validate image ID format.
-        
-        Args:
-            img_id: Image identifier string
-            
-        Raises:
-            ValueError: If image ID is invalid
         """
         if not img_id or not img_id.strip():
             raise ValueError("Image ID cannot be empty")

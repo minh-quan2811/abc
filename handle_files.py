@@ -1,108 +1,231 @@
 import os
 import re
-import threading
+import asyncio
+import tempfile
+from pathlib import Path
+from typing import Union, List
 from markitdown import MarkItDown
-from llama_cloud_services import LlamaParse
-from llama_cloud_services.parse.utils import ParsingMode
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# Import refactored components
+from app.utils.refactor_file_processor.image_ocr_parser_gemini import ImageOcrParser
+from app.utils.refactor_file_processor.pdf_parser import PdfParser
 from app.core.config import settings
-from docx import Document
 
 class FileProcessor:
-    _llama_instance = None
-    _llama_lock = threading.Lock()
+    """
+    Unified file processor that handles multiple document types.
+    Uses Gemini OCR for PDF/DOCX, MarkItDown for text files, and Excel parsing.
+    """
 
-    def __init__(self):
-        # MarkItDown có thể tạo mỗi instance riêng cho mỗi lần gọi
+    def __init__(
+        self,
+        enable_ocr: bool = True
+    ):
         self.md = MarkItDown(enable_plugins=False)
-
+        
+        # Setup Gemini OCR pipeline
+        self.enable_ocr = enable_ocr
+        if enable_ocr:
+            self.gemini_model = ChatGoogleGenerativeAI(
+                google_api_key=settings.GOOGLE_API_KEY,
+                model="gemini-2.5-flash",
+                temperature=0,
+                max_tokens=None,
+                timeout=None,
+                max_retries=2,
+            )
+            self.ocr_parser = ImageOcrParser(model_llm=self.gemini_model)
+        else:
+            self.ocr_parser = None
 
     def _clean_text(self, text: str) -> str:
-        """Xóa các cột Unnamed và NaN"""
+        """Remove Unnamed columns and NaN values."""
         text = re.sub(r"Unnamed:\s*\d+", "", text)
         text = re.sub(r"\bNaN\b", "", text)
         return text
 
-    def _split_sheets(self, markdown_text: str) -> list[str]:
-        """Tách văn bản markdown thành các sheet theo header ##"""
+    def _split_sheets(self, markdown_text: str) -> List[str]:
+        """Split markdown text into sheets by ## headers."""
         sheets = re.split(r"(?=^## )", markdown_text, flags=re.MULTILINE)
         return [part.strip() for part in sheets if part.strip().startswith("##")]
 
-    def read_excel(self, file_path: str) -> list[str]:
-        """Đọc file Excel, chuyển thành Markdown, dọn sạch, rồi tách sheet"""
+    def read_excel(self, file_path: str) -> List[str]:
+        """
+        Read Excel file, convert to Markdown, clean, and split by sheets.
+        """
         markdown_text = self.md.convert(file_path).text_content
         markdown_text_clean = self._clean_text(markdown_text)
         return self._split_sheets(markdown_text_clean)
 
-    def _docx_has_image_or_table(self, file_path: str) -> bool:
-        doc = Document(file_path)
-        # Check for tables
-        if doc.tables:
-            return True
-        # Check for images (inline shapes)
-        for paragraph in doc.paragraphs:
-            for run in paragraph.runs:
-                # if 'w:drawing' in run._element.xml:
-                if run._element.xpath('.//pic:pic'):
-                    return True
-        return False
+    def read_text_file(self, file_path: str) -> str:
+        """
+        Read plain text files (txt, md) using MarkItDown.
+        """
+        return self.md.convert(file_path).text_content
 
-    def read_markdownable(self, file_path: str) -> str:
-        """Đọc file text-like (md, txt)"""
-        file_ext = file_path.split(".")[-1].lower()
-        if file_ext == "docx":
-            if self._docx_has_image_or_table(file_path):
-                print("DOCX contains image or table, using LlamaParse...")
-                parser = self._get_llama_parser()
-                parse_result = parser.parse(file_path)
-                markdown_documents = parse_result.get_markdown_documents()
-                text = "\n\n".join(doc.text_resource.text for doc in markdown_documents)
-                return text
+    def _docx_to_pdf(self, docx_path: str) -> str:
+        """
+        Convert DOCX to PDF.
+        """
+        try:
+            from docx2pdf import convert
+            
+            # Create temp directory for PDF output
+            temp_dir = tempfile.mkdtemp()
+            pdf_path = os.path.join(temp_dir, Path(docx_path).stem + ".pdf")
+            
+            # Convert DOCX to PDF
+            convert(docx_path, pdf_path)
+            
+            if os.path.exists(pdf_path):
+                return pdf_path
             else:
-                print("DOCX contains only text, using MarkItDown...")
-                return self.md.convert(file_path).text_content
-        else:
-            print("Processing non-docx file with MarkItDown...")
-            return self.md.convert(file_path).text_content
+                raise RuntimeError("docx2pdf conversion failed - PDF not created")
+                
+        except ImportError:
+            raise RuntimeError(
+                "docx2pdf not installed. Install with: pip install docx2pdf"
+            )
+        except Exception as e:
+            raise RuntimeError(f"DOCX to PDF conversion failed: {e}")
 
-    def read_with_llama(self, file_path: str) -> str:
-        """Đọc file PDF, ảnh"""
-        print("Processing pdf with LlamaParse...")
-        parser = self._get_llama_parser()
-        parse_result = parser.parse(file_path)
-        markdown_documents = parse_result.get_markdown_documents()
-        text = "\n\n".join(doc.text_resource.text for doc in markdown_documents)
-        return text
-
+    async def _read_pdf_with_ocr(
+        self,
+        file_path: str,
+        batch_size: int = 5,
+        filter_images: bool = True
+    ) -> str:
+        """
+        Read PDF using Gemini OCR parser.
+        """
+        if not self.enable_ocr or self.ocr_parser is None:
+            raise RuntimeError("OCR is not enabled. Initialize with enable_ocr=True")
         
-    def read_file(self, file_path: str) -> str | list[str]:
-        """Router: chọn cách đọc file tùy loại"""
+        pdf_parser = PdfParser(ocr_parser=self.ocr_parser)
+        pdf_parser.load_pdf(file_path)
+        await pdf_parser.parse_and_ocr(
+            batch_size=batch_size,
+            filter_images=filter_images
+        )
+        return pdf_parser.get_parsed_text()
+
+    def read_pdf(
+        self,
+        file_path: str,
+        batch_size: int = 5,
+        filter_images: bool = True
+    ) -> str:
+        """
+        Read PDF file with OCR support (synchronous wrapper).
+        """
+        return asyncio.run(
+            self._read_pdf_with_ocr(file_path, batch_size, filter_images)
+        )
+
+    def read_docx(
+        self,
+        file_path: str,
+        batch_size: int = 5,
+        filter_images: bool = True
+    ) -> str:
+        """
+        Read DOCX file by converting to PDF and using OCR.
+        """
+        # Convert DOCX to PDF
+        pdf_path = self._docx_to_pdf(file_path)
+        
+        try:
+            # Read PDF with OCR
+            content = self.read_pdf(pdf_path, batch_size, filter_images)
+            return content
+        finally:
+            # Cleanup temporary PDF
+            if os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                    temp_dir = os.path.dirname(pdf_path)
+                    if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                        os.rmdir(temp_dir)
+                except Exception:
+                    pass
+
+    def read_file(self, file_path: str) -> Union[str, List[str]]:
+        """
+        Universal file reader that routes to appropriate handler.
+        """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        file_ext = file_path.split(".")[-1].lower()
-        if file_ext in ["xlsx", "xls"]:
+        file_ext = Path(file_path).suffix.lower()
+        
+        # Excel files
+        if file_ext in [".xlsx", ".xls"]:
             return self.read_excel(file_path)
-        elif file_ext in ["pdf", "jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif"]:
-            return self.read_with_llama(file_path)
+        
+        # PDF files
+        elif file_ext == ".pdf":
+            if self.enable_ocr:
+                return self.read_pdf(file_path)
+            else:
+                return self.md.convert(file_path).text_content
+        
+        # DOCX files
+        elif file_ext == ".docx":
+            if self.enable_ocr:
+                return self.read_docx(file_path)
+            else:
+                return self.md.convert(file_path).text_content
+        
+        # Plain text files
+        elif file_ext in [".txt", ".md"]:
+            return self.read_text_file(file_path)
+        
+        # Image files
+        elif file_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif"]:
+            raise ValueError(
+                f"Direct image file processing not supported. "
+                f"Images should be embedded in PDF/DOCX files."
+            )
+        
         else:
-            return self.read_markdownable(file_path)
+            raise ValueError(f"Unsupported file type: {file_ext}")
 
 file_processor = FileProcessor()
 
-# Ví dụ sử dụng
-if __name__ == "__main__":
-    processor = FileProcessor()
-    import time
-    start_time = time.time()    
-    sheets = processor.read_file(rf"c:\Users\four\Downloads\data-ai-marketing_2609_v3\show_daily(15).pdf")
-    # print(sheets[0])
-    with open('read_file.md2', "w", encoding="utf-8") as f:
-        if isinstance(sheets, list):
-            for sheet in sheets:
-                f.write(sheet + "\n\n")
-        else:
-            f.write(sheets)
-    print(time.time()- start_time)
 
-    # with open(r"C:\Users\Admin\Downloads\test_2.md", "w", encoding="utf-8") as f:
-    #     f.write(sheets[0])
+
+# # Example usage
+# if __name__ == "__main__":
+#     # Initialize processor
+#     processor = FileProcessor(
+#         gemini_api_key=settings.GOOGLE_API_KEY,
+#         enable_ocr=True
+#     )
+    
+#     # Test PDF
+#     print("Testing PDF...")
+#     pdf_content = processor.read_file(r"C:\Users\PC\Downloads\data-ai-marketing\data-ai-marketing_2209\６１６ＭＫ戦略目標データ活用③.pdf")
+#     with open("text.md", 'w', encoding='utf-8') as f:
+#         f.write(pdf_content)
+#     print(f"✓ PDF parsed successfully! Output saved to text.md ({len(pdf_content)} chars)")
+    
+    
+#     # Test DOCX
+#     print("\nTesting DOCX...")
+#     docx_content = processor.read_file(r"C:\Users\PC\Downloads\data-ai-marketing\data-ai-marketing_2209\ＪＣＡＩ００５棚割.docx")
+#     with open("text.md", 'w', encoding='utf-8') as f:
+#         f.write(docx_content)
+#     print(f"✓ PDF parsed successfully! Output saved to text.md ({len(docx_content)} chars)")
+
+#     # Test Excel
+#     print("\nTesting Excel...")
+#     excel_sheets = processor.read_file("test.xlsx")
+#     print(f"Excel sheets: {len(excel_sheets)}")
+    
+#     # Test text file
+#     print("\nTesting TXT...")
+#     txt_content = processor.read_file(r"C:\Users\PC\Documents\Semantic Chunking.txt")
+#     with open("text.md", 'w', encoding='utf-8') as f:
+#         f.write(txt_content)
+#     print(f"✓ PDF parsed successfully! Output saved to text.md ({len(txt_content)} chars)")

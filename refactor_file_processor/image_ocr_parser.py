@@ -80,14 +80,6 @@ class ImageOcrParser:
     ) -> Dict[str, str]:
         """
         Parse images and return OCR content.
-        
-        Args:
-            images_dict: Dict of {image_id: PIL_Image}
-            debug: Enable debug logging
-            filter_images: Apply quality filtering
-            
-        Returns:
-            Dict of {image_id: extracted_text}
         """
         if not images_dict:
             return {}
